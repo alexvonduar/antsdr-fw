@@ -33,7 +33,7 @@ $(warning *** This repository has only been tested with $(VIVADO_VERSION),)
 $(warning *** and you have $(VIVADO_INSTALL))
 $(warning *** Please 1] set the path to Vivado $(VIVADO_VERSION) OR)
 $(warning ***        2] remove $(VIVADO_INSTALL) from the path OR)
-$(error "      3] export VIVADO_VERSION=v20xx.x")
+$(warning "      3] export VIVADO_VERSION=v20xx.x")
 	endif
 endif
 
@@ -135,32 +135,32 @@ build/rootfs.cpio.gz: buildroot/output/images/rootfs.cpio.gz | build
 build/$(TARGET).itb: u-boot-xlnx/tools/mkimage build/zImage build/rootfs.cpio.gz $(TARGET_DTS_FILES) build/system_top.bit
 	u-boot-xlnx/tools/mkimage -f scripts/$(TARGET).its $@
 
-build/system_top.hdf:  | build
+build/system_top.xsa:  | build
 ifeq (1, ${HAVE_VIVADO})
-	bash -c "source $(VIVADO_SETTINGS) && make -C hdl/projects/$(TARGET) && cp hdl/projects/$(TARGET)/$(TARGET).sdk/system_top.hdf $@"
-	unzip -l $@ | grep -q ps7_init || cp hdl/projects/$(TARGET)/$(TARGET).srcs/sources_1/bd/system/ip/system_sys_ps7_0/ps7_init* build/
+	bash -c "source $(VIVADO_SETTINGS) && make -C hdl/projects/$(TARGET) && cp hdl/projects/$(TARGET)/$(TARGET).sdk/system_top.xsa $@"
+	unzip -l $@ | grep -q ps7_init || cp hdl/projects/$(TARGET)/$(TARGET).gen/sources_1/bd/system/ip/system_sys_ps7_0/ps7_init* build/
 else
 ifneq ($(HDF_URL),)
 	wget -T 3 -t 1 -N --directory-prefix build $(HDF_URL)
 endif
 endif
 
-### TODO: Build system_top.hdf from src if dl fails - need 2016.2 for that ...
+### TODO: Build system_top.xsa from src if dl fails - need 2016.2 for that ...
 
-build/sdk/fsbl/Release/fsbl.elf build/sdk/hw_0/system_top.bit : build/system_top.hdf
+build/sdk/fsbl/Release/fsbl.elf build/sdk/system_top/hw/system_top.bit : build/system_top.xsa
 	rm -Rf build/sdk
 ifeq (1, ${HAVE_VIVADO})
-	bash -c "source $(VIVADO_SETTINGS) && xsdk -batch -source scripts/create_fsbl_project.tcl"
+	bash -c "source $(VIVADO_SETTINGS) && xsct scripts/create_fsbl_project.tcl"
 else
-	mkdir -p build/sdk/hw_0
-	unzip -o build/system_top.hdf system_top.bit -d build/sdk/hw_0
+	mkdir -p build/sdk/system_top/hw
+	unzip -o build/system_top.xsa system_top.bit -d build/sdk/system_top/hw
 endif
 
-build/system_top.bit: build/sdk/hw_0/system_top.bit
+build/system_top.bit: build/sdk/system_top/hw/system_top.bit
 	cp $< $@
 
 build/boot.bin: build/sdk/fsbl/Release/fsbl.elf build/u-boot.elf
-	@echo img:{[bootloader] $^ } > build/boot.bif
+	@echo "img\n:{\n[bootloader] $^\n}" > build/boot.bif
 	bash -c "source $(VIVADO_SETTINGS) && bootgen -image build/boot.bif -w -o $@"
 
 ### MSD update firmware file ###
@@ -200,9 +200,9 @@ clean:
 
 SDIMGDIR = $(CURDIR)/build_sdimg
 sdimg: build/
-	mkdir $(SDIMGDIR)
+	mkdir -p $(SDIMGDIR)
 	cp build/sdk/fsbl/Release/fsbl.elf 	$(SDIMGDIR)/fsbl.elf  
-	cp build/sdk/hw_0/system_top.bit 	$(SDIMGDIR)/system_top.bit
+	cp build/sdk/system_top/hw/system_top.bit 	$(SDIMGDIR)/system_top.bit
 	cp build/u-boot.elf 			$(SDIMGDIR)/u-boot.elf
 	cp $(CURDIR)/linux/arch/arm/boot/uImage	$(SDIMGDIR)/uImage
 	cp build/zynq-$(TARGET)-sdr.dtb 	$(SDIMGDIR)/devicetree.dtb
@@ -210,7 +210,7 @@ sdimg: build/
 	cp build/rootfs.cpio.gz  		$(SDIMGDIR)/ramdisk.image.gz
 	mkimage -A arm -T ramdisk -C gzip -d $(SDIMGDIR)/ramdisk.image.gz $(SDIMGDIR)/uramdisk.image.gz
 	touch 	$(SDIMGDIR)/boot.bif
-	echo "image : {[bootloader] $(SDIMGDIR)/fsbl.elf  $(SDIMGDIR)/system_top.bit  $(SDIMGDIR)/u-boot.elf}" >  $(SDIMGDIR)/boot.bif
+	echo "img:\n{\n[bootloader] $(SDIMGDIR)/fsbl.elf\n$(SDIMGDIR)/system_top.bit\n$(SDIMGDIR)/u-boot.elf\n}" >  $(SDIMGDIR)/boot.bif
 	bash -c "source $(VIVADO_SETTINGS) && bootgen -image $(SDIMGDIR)/boot.bif -o i $(SDIMGDIR)/BOOT.bin"
 	rm $(SDIMGDIR)/fsbl.elf
 	rm $(SDIMGDIR)/system_top.bit
@@ -246,7 +246,7 @@ dfu-ram: build/$(TARGET).dfu
 	dfu-util -D build/$(TARGET).dfu -a firmware.dfu
 	dfu-util -e
 
-jtag-bootstrap: build/u-boot.elf build/sdk/hw_0/ps7_init.tcl build/sdk/hw_0/system_top.bit scripts/run.tcl
+jtag-bootstrap: build/u-boot.elf build/ps7_init.tcl build/sdk/system_top/hw/system_top.bit scripts/run.tcl
 	$(CROSS_COMPILE)strip build/u-boot.elf
 	zip -j build/$(ZIP_ARCHIVE_PREFIX)-$@-$(VERSION).zip $^
 
